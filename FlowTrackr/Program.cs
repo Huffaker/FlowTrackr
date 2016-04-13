@@ -144,14 +144,30 @@ namespace FlowTrackr
             {
                 s_previousPresence = s_currentPresence;
                 s_currentPresence = contactAvailability;
-                var newInformation = new Dictionary<PublishableContactInformationType, object>()
-                {
-                    { PublishableContactInformationType.Availability, contactAvailability },
-                    { PublishableContactInformationType.PersonalNote, message ?? string.Empty }
-                };
 
-                s_lyncClient.Self.BeginPublishContactInformation(newInformation, null, null);
-            }
+				//Check current Lync status
+				var lyncClientStatus =
+					(ContactAvailability) s_lyncClient.Self.Contact.GetContactInformation(ContactInformationType.Availability);
+
+	            if (s_previousPresence == lyncClientStatus)
+	            {
+					//Updating
+		            var newInformation = new Dictionary<PublishableContactInformationType, object>()
+		            {
+			            {PublishableContactInformationType.Availability, contactAvailability},
+			            {PublishableContactInformationType.PersonalNote, message ?? string.Empty}
+		            };
+
+		            s_lyncClient.Self.BeginPublishContactInformation(newInformation, null, null);
+	            }
+	            else
+	            {
+					//Lync status was changed by user, set state to free, we will wait until the user goes back to free before continuing
+		            s_previousPresence = ContactAvailability.Free;
+					s_currentPresence = ContactAvailability.Free;
+	            }
+
+			}
         }
 
         private static IntPtr SetHook(LowLevelKeyboardProc proc)
