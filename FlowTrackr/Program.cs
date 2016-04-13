@@ -27,6 +27,8 @@ namespace FlowTrackr
         private static IntPtr s_hookId = IntPtr.Zero;
         private static IntPtr s_mouseHookId = IntPtr.Zero;
 
+        private static IntPtr s_handle = IntPtr.Zero;
+
         private static LyncClient s_lyncClient;
         private static object s_lyncClient_lock = new object();
 
@@ -40,24 +42,55 @@ namespace FlowTrackr
 
         static void Main(string[] args)
         {
-            var handle = GetConsoleWindow();
-
-            ShowWindow(handle, SW_HIDE);
-
-            handler = new ConsoleEventDelegate(ConsoleEventCallback);
-            SetConsoleCtrlHandler(handler, true);
-
-            s_lyncClient = LyncClient.GetClient();
+            Initialize();
             s_hookId = SetHook(s_proc);
             s_mouseHookId = SetHookMouse(s_procMouse);
             s_timer = new System.Threading.Timer(Timer_Elapsed, null, 0, INTERVAL_TIME_MS);
 
             Application.Run();
+            //UnhookWindowsHookEx(s_hookId);
+            //UnhookWindowsHookEx(s_mouseHookId);
+            Thread.Sleep(-1);
+        }
+
+        static void Initialize()
+        {
+            s_handle = GetConsoleWindow();
+
+            handler = new ConsoleEventDelegate(ConsoleEventCallback);
+            SetConsoleCtrlHandler(handler, true);
+
+            CreateLyncClient();
+
+            ShowWindow(s_handle, SW_HIDE);
+        }
+
+        static void Deinitialize()
+        {
+
             UnhookWindowsHookEx(s_hookId);
             UnhookWindowsHookEx(s_mouseHookId);
         }
 
+        static LyncClient CreateLyncClient()
+        {
 
+            do
+            {
+                try
+                {
+                    s_lyncClient = null;
+                    s_lyncClient = LyncClient.GetClient();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Lync is not running, please start it. {ex}");
+                    Thread.Sleep(5000);
+                }
+            } while (s_lyncClient == null);
+
+            return s_lyncClient;
+        }
 
         static bool ConsoleEventCallback(int eventType)
         {
@@ -140,34 +173,55 @@ namespace FlowTrackr
 
         private static void SetPresence(ContactAvailability contactAvailability, string message = null)
         {
-            lock (s_lyncClient_lock)
+            try
             {
-                s_previousPresence = s_currentPresence;
-                s_currentPresence = contactAvailability;
+                lock (s_lyncClient_lock)
+                {
+                    s_previousPresence = s_currentPresence;
+                    s_currentPresence = contactAvailability;
 
-				//Check current Lync status
-				var lyncClientStatus =
-					(ContactAvailability) s_lyncClient.Self.Contact.GetContactInformation(ContactInformationType.Availability);
+                    //Check current Lync status
+                    var lyncClientStatus =
+                        (ContactAvailability)
+                            s_lyncClient.Self.Contact.GetContactInformation(ContactInformationType.Availability);
 
-	            if (s_previousPresence == lyncClientStatus)
-	            {
-					//Updating
-		            var newInformation = new Dictionary<PublishableContactInformationType, object>()
-		            {
-			            {PublishableContactInformationType.Availability, contactAvailability},
-			            {PublishableContactInformationType.PersonalNote, message ?? string.Empty}
-		            };
+                    if (s_previousPresence == lyncClientStatus)
+                    {
+                        //Updating
+                        var newInformation = new Dictionary<PublishableContactInformationType, object>()
+                        {
+                            {PublishableContactInformationType.Availability, contactAvailability},
+                            {PublishableContactInformationType.PersonalNote, message ?? string.Empty}
+                        };
 
-		            s_lyncClient.Self.BeginPublishContactInformation(newInformation, null, null);
-	            }
-	            else
-	            {
-					//Lync status was changed by user, set state to free, we will wait until the user goes back to free before continuing
-		            s_previousPresence = ContactAvailability.Free;
-					s_currentPresence = ContactAvailability.Free;
-	            }
+                        s_lyncClient.Self.BeginPublishContactInformation(newInformation, null, null);
+                    }
+                    else
+                    {
+                        //Lync status was changed by user, set state to free, we will wait until the user goes back to free before continuing
+                        s_previousPresence = ContactAvailability.Free;
+                        s_currentPresence = ContactAvailability.Free;
+                    }
 
-			}
+                }
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    ShowWindow(s_handle, SW_SHOW);
+                    Console.WriteLine(ex);
+                }
+                catch
+                {
+                    // ignored
+                }
+                finally
+                {
+                    //Deinitialize();
+                    Initialize();
+                }
+            }
         }
 
         private static IntPtr SetHook(LowLevelKeyboardProc proc)
@@ -265,5 +319,6 @@ namespace FlowTrackr
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
         private const int SW_HIDE = 0;
+        private const int SW_SHOW = 5;
     }
 }
